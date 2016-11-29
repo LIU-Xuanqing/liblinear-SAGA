@@ -2530,6 +2530,60 @@ static void sample(const double *leverage, int l, int *index, int n) {
   delete [] cumsum;
 }
 
+static double prox(double x, double eta, double k) {
+  if (x - k > eta) return x - k - eta;
+  else if (x - k < -eta) return x - k + eta;
+  else return 0.0;
+}
+
+static double proxn2(double x, double eta, double k, int n) {
+  if (n == 1) return prox(x, eta, k);
+  else return prox(proxn2(x, eta, k, n - 1), eta, k);
+}
+
+static double proxn(double x, double eta, double k, int n) {
+  if (abs(k) <= eta) {
+    if (x > n * (eta + k))
+      return x - n * (eta + k);
+    else if (x > n * (k - eta))
+      return 0.0;
+    else
+      return x - n * (k - eta);
+  }
+  else if (k > eta) {
+    double min_i = (x + eta - k) / (eta + k);
+    if (min_i < 0)
+      return x - n * (k - eta);
+    else if (min_i >= n)
+      return x - n * (k + eta);
+    else {
+      int min_i_ = (int)min_i;
+      if (x - k + eta - min_i_ * (k + eta) < 2 * eta)
+        return (1 + min_i_ - n) * (k - eta);
+      else
+        return x - (1 + min_i_) * (k + eta) + (1 + min_i_ - n) * (k - eta);
+    }
+  }
+  else {
+    double min_i = (x - n * (k - eta)) / (eta - k);
+    if (min_i < 0)
+      return x - n * (k - eta);
+    else if (min_i >= n)
+      return x - n * (eta + k);
+    else {
+      int min_i_ = (int)min_i;
+      if (x + (min_i_ - n) * (k - eta) < 2 * eta)
+        return -min_i_ * (eta + k);
+      else
+        return x + (min_i_ - n) * (k - eta) - 2 * eta - min_i_ * (eta + k);
+    }
+  }
+}
+
+static double recover(double w, int delay, int now, double eta, double k) {
+  if (delay == now) return w;
+  return proxn(w, eta, k, now - delay);
+}
 
 #undef GETI
 #define GETI(i) (y[i]+1)
@@ -2559,6 +2613,7 @@ static void solve_l1r_lr_proxsagapp(const problem *prob_col,
   double *sum_grad = new double[w_size];
   double *leverage = new double[l];
   int *index = new int[max_saga_iter];
+  int *delay = new int[w_size];
   //double eta = 0.0000003;
   double eta = 0.00007;
   double C[3] = {Cn, 0, Cp};
@@ -2566,6 +2621,7 @@ static void solve_l1r_lr_proxsagapp(const problem *prob_col,
   for (j = 0; j < w_size; ++j) {
       w_saga[j] = 0;
       sum_grad[j] = 0;
+      delay[j] = 0;
   }
 
   for (j = 0; j < l; ++j) {
@@ -2606,19 +2662,15 @@ static void solve_l1r_lr_proxsagapp(const problem *prob_col,
       double tau_tmp = 1 / (1 + exp_wTx);
       D[j] = C[GETI(j)] * exp_wTx * tau_tmp * tau_tmp;
   }
-  info("Begin newton iteration\n");
+  // info("Begin newton iteration\n");
   double time = 0.0;
   while (newton_iter < max_newton_iter) {
     double newton_beg = clock();
-    leverage_value(prob, D, leverage); // fill the leverage scores
-    // solve with SAGA
+    // solve with SAGA++
     for (int saga_outer_iter = 0; saga_outer_iter < saga_outer; ++saga_outer_iter) {
-      sample(leverage, l, index, max_saga_iter);
     for (int saga_iter = 0; saga_iter < max_saga_iter; ++saga_iter) {
       // randomly choose element \in (0,...,l-1)
       int choose = rand() % l;
-      //int choose = index[saga_iter];
-      //printf("choose: %d\n", choose);
       // calculate difference of gradient for element chosen
       double xjTw_saga = 0.0;
       feature_node *x = prob->x[choose];
@@ -3743,60 +3795,6 @@ static void solve_l1r_lr_asyncsagapp(const problem *prob_col,
  }
 }
 
-static double prox(double x, double eta, double k) {
-  if (x - k > eta) return x - k - eta;
-  else if (x - k < -eta) return x - k + eta;
-  else return 0.0;
-}
-
-static double proxn2(double x, double eta, double k, int n) {
-  if (n == 1) return prox(x, eta, k);
-  else return prox(proxn2(x, eta, k, n - 1), eta, k);
-}
-
-static double proxn(double x, double eta, double k, int n) {
-  if (abs(k) <= eta) {
-    if (x > n * (eta + k))
-      return x - n * (eta + k);
-    else if (x > n * (k - eta))
-      return 0.0;
-    else
-      return x - n * (k - eta);
-  }
-  else if (k > eta) {
-    double min_i = (x + eta - k) / (eta + k);
-    if (min_i < 0)
-      return x - n * (k - eta);
-    else if (min_i >= n)
-      return x - n * (k + eta);
-    else {
-      int min_i_ = (int)min_i;
-      if (x - k + eta - min_i_ * (k + eta) < 2 * eta)
-        return (1 + min_i_ - n) * (k - eta);
-      else
-        return x - (1 + min_i_) * (k + eta) + (1 + min_i_ - n) * (k - eta);
-    }
-  }
-  else {
-    double min_i = (x - n * (k - eta)) / (eta - k);
-    if (min_i < 0)
-      return x - n * (k - eta);
-    else if (min_i >= n)
-      return x - n * (eta + k);
-    else {
-      int min_i_ = (int)min_i;
-      if (x + (min_i_ - n) * (k - eta) < 2 * eta)
-        return -min_i_ * (eta + k);
-      else
-        return x + (min_i_ - n) * (k - eta) - 2 * eta - min_i_ * (eta + k);
-    }
-  }
-}
-
-static double recover(double w, int delay, int now, double eta, double k) {
-  if (delay == now) return w;
-  return proxn(w, eta, k, now - delay);
-}
 
 #undef GETI
 #define GETI(i) (y[i]+1)
@@ -3811,7 +3809,7 @@ static void solve_l1r_lr_sagapp_opt(const problem *prob_col,
   int w_size = prob_col->n;
   int j, s;
   int max_saga_outer = max_saga_iter;
-  int max_saga_inner = 0.1 * l;
+  int max_saga_inner = 1 * l;
   double nu = 1e-12;
   double inner_eps = 1;
   double sigma = 0.01;
@@ -3823,7 +3821,7 @@ static void solve_l1r_lr_sagapp_opt(const problem *prob_col,
   double *sum_grad = new double[w_size];
   int *delay = new int[w_size];
   //double eta = 1.0e-6; // mnist
-  double eta = 0.0001; // realsim
+  double eta = 0.00001; // realsim
   //double eta = 3.0e-7;
   double C[3] = {1, 0, 1};
   for (j = 0; j < w_size; ++j) {
@@ -3942,6 +3940,156 @@ static void solve_l1r_lr_sagapp_opt(const problem *prob_col,
     info("%lf, %lf\n", value, time);
   }
 }
+
+
+#undef GETI
+#define GETI(i) (y[i]+1)
+static void solve_l1r_lr_sagapp_batch(const problem *prob_col,
+                              double *w_saga,
+                              double eps,
+                              double Cp,
+                              double Cn,
+                              int max_saga_iter,
+                              const problem *prob) {
+  int l = prob_col->l;
+  int w_size = prob_col->n;
+  int j, s;
+  int max_saga_outer = max_saga_iter;
+  int batch = 32;
+  int max_saga_inner = 2 * l / batch;
+  double nu = 1e-12;
+  double inner_eps = 1;
+  double sigma = 0.01;
+
+  schar *y = new schar[l];
+
+  double *xTw_saga = new double[l];
+  double *xTw_saga_ = new double[l];
+  double *sum_grad = new double[w_size];
+  int *delay = new int[w_size];
+  //double eta = 1.0e-6; // mnist
+  double eta = 0.0004; // realsim
+  //double eta = 3.0e-7;
+  double C[3] = {1, 0, 1};
+  for (j = 0; j < w_size; ++j) {
+    w_saga[j] = 0;
+    sum_grad[j] = 0;
+    delay[j] = 0;
+  }
+
+  for (j = 0; j < l; ++j) {
+    if (prob_col->y[j] > 0)
+      y[j] = 1;
+    else
+      y[j] = -1;
+    xTw_saga[j] = 0;
+  }
+  for(j=0; j<w_size; j++)
+  {
+    feature_node *x = prob_col->x[j];
+    while(x->index != -1)
+    {
+      xTw_saga[x->index-1] += w_saga[j] * x->value;
+      x++;
+    }
+  }
+  for (j = 0; j < l; ++j) {
+    feature_node *x = prob->x[j];
+    double tmp = 0.0;
+    tmp = C[GETI(j)];
+    if (y[j] > 0) {
+      tmp *= -1.0 / (1.0 + exp(xTw_saga[j]));
+    } else {
+      tmp *= 1.0 - 1.0 / (1.0 + exp(xTw_saga[j]));
+    }
+    while (x->index != -1) {
+      sum_grad[x->index - 1] += x->value * tmp;
+      x++;
+    }
+  }
+  double time = 0.0;
+  for (int saga_outer_iter = 0; saga_outer_iter < max_saga_outer; ++saga_outer_iter) {
+    double begin = clock();
+    for (int saga_inner_iter = 0; saga_inner_iter < max_saga_inner; ++saga_inner_iter) { 
+      // choose sample
+      int choose = rand() % (l - batch + 1);
+      for (int k = choose; k < choose + batch; ++k) {
+      // calculate gradient
+      double xTw_choose = 0.0;
+      feature_node *x = prob->x[k];
+      while (x->index != -1) {
+        int idx = x->index - 1;
+        w_saga[idx] = recover(w_saga[idx], delay[idx], saga_inner_iter, eta, eta * sum_grad[idx]);
+        xTw_choose += x->value * w_saga[idx];
+        x++;
+      }
+      // update sum_grad and xTw_saga
+      x = prob->x[k];
+      double tmp = C[GETI(k)] * (1.0 / (exp(xTw_saga[k]) + 1.0) - 1.0 / (exp(xTw_choose) + 1.0));
+      while (x->index != -1) {
+        int idx = x->index - 1;
+        delay[idx] = saga_inner_iter + 1;
+        double descent = w_saga[idx] - eta * (sum_grad[idx] + l * x->value * tmp);
+        sum_grad[idx] += tmp * x->value;
+        if (descent > eta) {
+          w_saga[idx] = descent - eta;
+        } else if (descent < -eta) {
+          w_saga[idx] = descent + eta;
+        } else {
+          w_saga[idx] = 0.0;
+        }
+        x++;
+      }
+      xTw_saga[k] = xTw_choose;
+      }
+    }
+    for (j = 0; j < w_size; ++j) {
+      w_saga[j] = recover(w_saga[j], delay[j], max_saga_inner, eta, eta * sum_grad[j]);
+      delay[j] = 0;
+    }
+    double end_inner = clock();
+    // recalculate
+    memset(xTw_saga, 0, sizeof(double) * l);
+    memset(sum_grad, 0, sizeof(double) * w_size);
+    for(j=0; j<w_size; j++)
+    {
+      feature_node *x = prob_col->x[j];
+      while(x->index != -1)
+      {
+        xTw_saga[x->index-1] += w_saga[j] * x->value;
+        x++;
+      }
+    }
+    for (j = 0; j < l; ++j) {
+      feature_node *x = prob->x[j];
+      double tmp = 0.0;
+      tmp = C[GETI(j)];
+      if (y[j] > 0) {
+        tmp *= -1.0 / (1.0 + exp(xTw_saga[j]));
+      } else {
+        tmp *= 1.0 - 1.0 / (1.0 + exp(xTw_saga[j]));
+      }
+      while (x->index != -1) {
+        sum_grad[x->index - 1] += x->value * tmp;
+        x++;
+      }
+    }
+    time += (clock() - begin) / CLOCKS_PER_SEC; 
+    double value = 0;
+    for (int i = 0; i < w_size; ++i) {
+      if (w_saga[i] != 0) {
+        value += fabs(w_saga[i]);
+      }
+    }
+    for (int i = 0; i < l; i++)
+      if (y[i] == 1)
+        value += C[GETI(i)] * log(1 + 1 / exp(xTw_saga[i]));
+      else
+        value += C[GETI(i)] * log(1 + exp(xTw_saga[i]));
+    info("%lf, %lf\n", value, time);
+  }
+}
+
 #undef GETI
 #define GETI(i) (y[i]+1)
 static void solve_l1r_lr_sagapp(const problem *prob_col,
@@ -5006,7 +5154,7 @@ static void train_one(const problem *prob, const parameter *param, double *w, do
       problem prob_col;
       feature_node *x_space = NULL;
       transpose(prob, &x_space ,&prob_col);
-      solve_l1r_lr_sagapp(&prob_col, w, primal_solver_tol, Cp, Cn, param->max_iter, prob);
+      solve_l1r_lr_sagapp_batch(&prob_col, w, primal_solver_tol, Cp, Cn, param->max_iter, prob);
       delete [] prob_col.y;
       delete [] prob_col.x;
       delete [] x_space;
