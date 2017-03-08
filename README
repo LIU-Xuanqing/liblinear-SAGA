@@ -1,0 +1,9 @@
+Suggested step size
+-------------------
+kddb:
+lambda = 1.0e-4 ===> eta = 1.0e-5
+lambda = 1.0e-5 ===> eta = 1.0e-6
+lambda = 1.0e-6 ===> eta = 1.0e-7
+lambda = 1.0e-7 ===> eta = 1.0e-8
+
+
