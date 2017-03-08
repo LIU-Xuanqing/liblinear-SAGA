@@ -1,4 +1,4 @@
-Suggested step size
+Suggested step size(for SVRG/SAGA/SAGA++)
 -------------------
 kddb:
 lambda = 1.0e-4 ===> eta = 1.0e-5
